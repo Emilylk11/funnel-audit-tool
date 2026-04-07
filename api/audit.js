@@ -13,31 +13,41 @@ export default async function handler(req, res) {
 
   const { action, campaignId, productId, funnelId } = req.query;
 
+  // Default date range: last 2 years to now (CC requires startDate/endDate)
+  const now = new Date();
+  const twoYearsAgo = new Date(now);
+  twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+  const endDate = `${now.getMonth()+1}/${now.getDate()}/${now.getFullYear()}`;
+  const startDate = `${twoYearsAgo.getMonth()+1}/${twoYearsAgo.getDate()}/${twoYearsAgo.getFullYear()}`;
+
+  function baseParams(extras = {}) {
+    return new URLSearchParams({ loginId, password, startDate, endDate, ...extras });
+  }
+
   try {
     let data = {};
 
     if (action === 'funnels') {
-      const url = `https://api.checkoutchamp.com/funnels/query/?loginId=${encodeURIComponent(loginId)}&password=${encodeURIComponent(password)}`;
-      const resp = await fetch(url);
+      const params = baseParams();
+      if (funnelId) params.append('funnelId', funnelId);
+      const resp = await fetch(`https://api.checkoutchamp.com/funnels/query/?${params}`);
       const json = await resp.json();
       data = { type: 'funnels', ...json };
     }
 
     else if (action === 'products') {
-      const params = new URLSearchParams({ loginId, password });
+      const params = baseParams();
       if (campaignId) params.append('campaignId', campaignId);
       if (productId) params.append('productId', productId);
-      const url = `https://api.checkoutchamp.com/products/query/?${params}`;
-      const resp = await fetch(url);
+      const resp = await fetch(`https://api.checkoutchamp.com/products/query/?${params}`);
       const json = await resp.json();
       data = { type: 'products', ...json };
     }
 
     else if (action === 'campaigns') {
-      const params = new URLSearchParams({ loginId, password });
+      const params = baseParams();
       if (campaignId) params.append('campaignId', campaignId);
-      const url = `https://api.checkoutchamp.com/campaigns/query/?${params}`;
-      const resp = await fetch(url);
+      const resp = await fetch(`https://api.checkoutchamp.com/campaigns/query/?${params}`);
       const json = await resp.json();
       data = { type: 'campaigns', ...json };
     }
@@ -46,17 +56,17 @@ export default async function handler(req, res) {
       const results = {};
 
       // 1. Query funnels
-      const funnelsResp = await fetch(`https://api.checkoutchamp.com/funnels/query/?loginId=${encodeURIComponent(loginId)}&password=${encodeURIComponent(password)}`);
+      const funnelsResp = await fetch(`https://api.checkoutchamp.com/funnels/query/?${baseParams()}`);
       results.funnels = await funnelsResp.json();
 
       // 2. Query campaigns
-      const campaignParams = new URLSearchParams({ loginId, password });
+      const campaignParams = baseParams();
       if (campaignId) campaignParams.append('campaignId', campaignId);
       const campaignsResp = await fetch(`https://api.checkoutchamp.com/campaigns/query/?${campaignParams}`);
       results.campaigns = await campaignsResp.json();
 
-      // 3. Query products for the campaign
-      const productParams = new URLSearchParams({ loginId, password });
+      // 3. Query products
+      const productParams = baseParams();
       if (campaignId) productParams.append('campaignId', campaignId);
       const productsResp = await fetch(`https://api.checkoutchamp.com/products/query/?${productParams}`);
       results.products = await productsResp.json();
