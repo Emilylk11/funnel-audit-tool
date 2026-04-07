@@ -291,7 +291,59 @@ export default function App() {
     return r;
   };
 
+  const [apiLoading, setApiLoading] = useState(false);
+  const [apiData, setApiData] = useState(null);
+  const [apiError, setApiError] = useState(null);
+  const [auditCampaignId, setAuditCampaignId] = useState('');
+
+  const runAutoAudit = async () => {
+    setApiLoading(true);
+    setApiError(null);
+    setApiData(null);
+    try {
+      const params = new URLSearchParams({ action: 'full-audit' });
+      if (auditCampaignId) params.append('campaignId', auditCampaignId);
+      const resp = await fetch(`/api/audit?${params}`);
+      if (!resp.ok) throw new Error(`API returned ${resp.status}`);
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      setApiData(data);
+
+      // Auto-populate slug validator if funnels data exists
+      if (data.funnels?.message) {
+        const funnelData = Array.isArray(data.funnels.message) ? data.funnels.message : [data.funnels.message];
+        const allSlugs = [];
+        funnelData.forEach(f => {
+          if (f.pages) {
+            (Array.isArray(f.pages) ? f.pages : [f.pages]).forEach(p => {
+              if (p.slug || p.pageSlug || p.url) allSlugs.push(p.slug || p.pageSlug || p.url);
+            });
+          }
+          if (f.slug) allSlugs.push(f.slug);
+        });
+        if (allSlugs.length > 0) setSlugText(allSlugs.join('\n'));
+      }
+
+      // Auto-populate pricing rows if products data exists
+      if (data.products?.message) {
+        const products = Array.isArray(data.products.message) ? data.products.message : [data.products.message];
+        const newRows = products.slice(0, 10).map(p => ({
+          label: p.productName || p.name || `Product ${p.productId || p.id}`,
+          basePrice: p.price || p.productPrice || '',
+          discount: '',
+          actualPrice: '',
+        }));
+        if (newRows.length > 0) setPricingRows(newRows);
+      }
+    } catch (err) {
+      setApiError(err.message);
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
   const tabs = [
+    { id: 'auto-audit', label: 'Auto-audit', icon: '🚀', badge: 0 },
     { id: 'checklist', label: 'Checklist', icon: '☑️', badge: failCount },
     { id: 'pricing', label: 'Pricing', icon: '💲', badge: pricingMismatches },
     { id: 'slugs', label: 'Slugs', icon: '🔗', badge: slugResult.duplicates },
@@ -340,6 +392,121 @@ export default function App() {
       <div style={{ display: 'flex', gap: 3, marginBottom: 14, background: OX.cream, borderRadius: 12, padding: 4, overflowX: 'auto' }}>
         {tabs.map(t => <TabBtn key={t.id} active={view === t.id} icon={t.icon} label={t.label} badge={t.badge} onClick={() => setView(t.id)} />)}
       </div>
+
+      {/* ── Auto-audit Tab ────────────────────────── */}
+      {view === 'auto-audit' && (
+        <div>
+          <div style={{ ...card, padding: 20, marginBottom: 12 }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 700 }}>🚀 Auto-audit via CC API</h3>
+            <p style={{ fontSize: 13, color: OX.warmGray, margin: '0 0 16px', lineHeight: 1.5 }}>
+              Enter a campaign ID to pull all products, pricing, and funnel data from Checkout Champ automatically. The audit engine will analyze everything and populate the other tabs with findings.
+            </p>
+
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={label}>Campaign ID (optional — leave blank for all)</label>
+                <input value={auditCampaignId} onChange={e => setAuditCampaignId(e.target.value)} placeholder="e.g., 136" style={input} />
+              </div>
+            </div>
+
+            <button onClick={runAutoAudit} disabled={apiLoading}
+              style={{ ...btnPrimary, width: '100%', opacity: apiLoading ? 0.6 : 1, background: `linear-gradient(135deg, ${OX.forest}, ${OX.forestLight})`, fontSize: 15, padding: '14px 24px' }}>
+              {apiLoading ? '⏳ Pulling data from Checkout Champ...' : '🚀 Run auto-audit'}
+            </button>
+
+            {apiError && (
+              <div style={{ marginTop: 12, padding: '12px 16px', borderRadius: 8, background: OX.redPale, color: OX.red, fontSize: 13, border: '1px solid #f0c0b0' }}>
+                <strong>Error:</strong> {apiError}
+              </div>
+            )}
+          </div>
+
+          {apiData && (
+            <div>
+              {/* Funnels Summary */}
+              {apiData.funnels?.result === 'SUCCESS' && (
+                <div style={{ ...card, padding: 16, marginBottom: 10 }}>
+                  <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: OX.forest }}>📊 Funnels found</h4>
+                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                    {(() => {
+                      const funnels = Array.isArray(apiData.funnels.message) ? apiData.funnels.message : [apiData.funnels.message];
+                      return funnels.map((f, i) => (
+                        <div key={i} style={{ padding: '8px 12px', background: i % 2 === 0 ? OX.cream : '#fff', borderRadius: 6, marginBottom: 4 }}>
+                          <strong>{f.funnelName || f.name || `Funnel ${f.funnelId || f.id}`}</strong>
+                          {f.funnelId && <span style={{ color: OX.warmGray, marginLeft: 8 }}>ID: {f.funnelId || f.id}</span>}
+                          {f.pages && <span style={{ color: OX.forest, marginLeft: 8 }}>{Array.isArray(f.pages) ? f.pages.length : 1} pages</span>}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Products Summary */}
+              {apiData.products?.result === 'SUCCESS' && (
+                <div style={{ ...card, padding: 16, marginBottom: 10 }}>
+                  <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: OX.terra }}>📦 Products pulled</h4>
+                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                    {(() => {
+                      const products = Array.isArray(apiData.products.message) ? apiData.products.message : [apiData.products.message];
+                      return (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: font }}>
+                            <thead>
+                              <tr>{['ID', 'Product name', 'Price', 'Status'].map(h =>
+                                <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: OX.warmGray, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: `2px solid ${OX.stone}` }}>{h}</th>
+                              )}</tr>
+                            </thead>
+                            <tbody>{products.slice(0, 20).map((p, i) => (
+                              <tr key={i} style={{ borderBottom: `1px solid ${OX.cream}` }}>
+                                <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{p.productId || p.id}</td>
+                                <td style={{ padding: '6px 10px', fontWeight: 500 }}>{p.productName || p.name}</td>
+                                <td style={{ padding: '6px 10px', color: OX.forest, fontWeight: 600 }}>${p.price || p.productPrice || '—'}</td>
+                                <td style={{ padding: '6px 10px' }}>
+                                  <span style={{ padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 600, background: (p.status || p.productStatus) === 'ACTIVE' ? OX.greenPale : OX.redPale, color: (p.status || p.productStatus) === 'ACTIVE' ? OX.green : OX.red }}>
+                                    {p.status || p.productStatus || 'unknown'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}</tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <p style={{ fontSize: 12, color: OX.forest, marginTop: 10, fontWeight: 600 }}>
+                    ✓ Pricing rows auto-populated in the Pricing tab
+                  </p>
+                </div>
+              )}
+
+              {/* Campaigns Summary */}
+              {apiData.campaigns?.result === 'SUCCESS' && (
+                <div style={{ ...card, padding: 16, marginBottom: 10 }}>
+                  <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: OX.charcoal }}>🎯 Campaigns</h4>
+                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                    {(() => {
+                      const campaigns = Array.isArray(apiData.campaigns.message) ? apiData.campaigns.message : [apiData.campaigns.message];
+                      return campaigns.slice(0, 10).map((c, i) => (
+                        <div key={i} style={{ padding: '8px 12px', background: i % 2 === 0 ? OX.cream : '#fff', borderRadius: 6, marginBottom: 4 }}>
+                          <strong>{c.campaignName || c.name || `Campaign ${c.campaignId || c.id}`}</strong>
+                          <span style={{ color: OX.warmGray, marginLeft: 8 }}>ID: {c.campaignId || c.id}</span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Raw data toggle */}
+              <details style={{ ...card, padding: 16 }}>
+                <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: OX.warmGray }}>View raw API response</summary>
+                <pre style={{ marginTop: 10, padding: 12, background: OX.cream, borderRadius: 8, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: 400, overflowY: 'auto', color: OX.charcoal }}>{JSON.stringify(apiData, null, 2)}</pre>
+              </details>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Checklist Tab ─────────────────────────── */}
       {view === 'checklist' && (
