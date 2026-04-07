@@ -295,11 +295,14 @@ export default function App() {
   const [apiData, setApiData] = useState(null);
   const [apiError, setApiError] = useState(null);
   const [auditCampaignId, setAuditCampaignId] = useState('');
+  const [auditFunnelName, setAuditFunnelName] = useState('');
+  const [filteredFunnels, setFilteredFunnels] = useState(null);
 
   const runAutoAudit = async () => {
     setApiLoading(true);
     setApiError(null);
     setApiData(null);
+    setFilteredFunnels(null);
     try {
       const params = new URLSearchParams({ action: 'full-audit' });
       if (auditCampaignId) params.append('campaignId', auditCampaignId);
@@ -309,11 +312,24 @@ export default function App() {
       if (data.error) throw new Error(data.error);
       setApiData(data);
 
+      // Filter funnels by name if provided
+      if (data.funnels?.message && auditFunnelName.trim()) {
+        const allFunnels = Array.isArray(data.funnels.message) ? data.funnels.message : [data.funnels.message];
+        const search = auditFunnelName.toLowerCase().trim();
+        const matched = allFunnels.filter(f => {
+          const name = (f.funnelName || f.name || '').toLowerCase();
+          return name.includes(search);
+        });
+        setFilteredFunnels(matched);
+      }
+
       // Auto-populate slug validator if funnels data exists
       if (data.funnels?.message) {
         const funnelData = Array.isArray(data.funnels.message) ? data.funnels.message : [data.funnels.message];
+        // If filtering by name, only use matched funnels for slugs
+        const funnelsToUse = (filteredFunnels && filteredFunnels.length > 0) ? filteredFunnels : funnelData;
         const allSlugs = [];
-        funnelData.forEach(f => {
+        funnelsToUse.forEach(f => {
           if (f.pages) {
             (Array.isArray(f.pages) ? f.pages : [f.pages]).forEach(p => {
               if (p.slug || p.pageSlug || p.url) allSlugs.push(p.slug || p.pageSlug || p.url);
@@ -404,10 +420,17 @@ export default function App() {
 
             <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <label style={label}>Campaign ID (optional — leave blank for all)</label>
-                <input value={auditCampaignId} onChange={e => setAuditCampaignId(e.target.value)} placeholder="e.g., 136" style={input} />
+                <label style={label}>Funnel name (search/filter)</label>
+                <input value={auditFunnelName} onChange={e => setAuditFunnelName(e.target.value)} placeholder="e.g., Ultimate Sleep System, Collagens 136" style={input} />
+              </div>
+              <div style={{ flex: 0, minWidth: 120 }}>
+                <label style={label}>Campaign ID (optional)</label>
+                <input value={auditCampaignId} onChange={e => setAuditCampaignId(e.target.value)} placeholder="e.g., 81" style={input} />
               </div>
             </div>
+            <p style={{ fontSize: 11, color: OX.warmGray, margin: '0 0 14px', lineHeight: 1.5, fontStyle: 'italic' }}>
+              Tip: Multiple funnels can share the same campaign ID. Use the funnel name to filter down to the specific one you're auditing.
+            </p>
 
             <button onClick={runAutoAudit} disabled={apiLoading}
               style={{ ...btnPrimary, width: '100%', opacity: apiLoading ? 0.6 : 1, background: `linear-gradient(135deg, ${OX.forest}, ${OX.forestLight})`, fontSize: 15, padding: '14px 24px' }}>
@@ -426,11 +449,19 @@ export default function App() {
               {/* Funnels Summary */}
               {apiData.funnels?.result === 'SUCCESS' && (
                 <div style={{ ...card, padding: 16, marginBottom: 10 }}>
-                  <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: OX.forest }}>📊 Funnels found</h4>
-                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                  <h4 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: OX.forest }}>
+                    📊 {filteredFunnels ? `Matching funnels (${filteredFunnels.length} of ${(Array.isArray(apiData.funnels.message) ? apiData.funnels.message : [apiData.funnels.message]).length})` : 'All funnels'}
+                  </h4>
+                  {filteredFunnels && filteredFunnels.length === 0 && (
+                    <div style={{ padding: '12px 16px', background: OX.terraPale, borderRadius: 8, fontSize: 13, color: OX.terra, marginBottom: 10 }}>
+                      No funnels matched "{auditFunnelName}". Try a shorter or different search term. Showing all funnels below.
+                    </div>
+                  )}
+                  <div style={{ fontSize: 13, lineHeight: 1.6, maxHeight: 300, overflowY: 'auto' }}>
                     {(() => {
-                      const funnels = Array.isArray(apiData.funnels.message) ? apiData.funnels.message : [apiData.funnels.message];
-                      return funnels.map((f, i) => (
+                      const allFunnels = Array.isArray(apiData.funnels.message) ? apiData.funnels.message : [apiData.funnels.message];
+                      const displayFunnels = (filteredFunnels && filteredFunnels.length > 0) ? filteredFunnels : allFunnels;
+                      return displayFunnels.map((f, i) => (
                         <div key={i} style={{ padding: '8px 12px', background: i % 2 === 0 ? OX.cream : '#fff', borderRadius: 6, marginBottom: 4 }}>
                           <strong>{f.funnelName || f.name || `Funnel ${f.funnelId || f.id}`}</strong>
                           {f.funnelId && <span style={{ color: OX.warmGray, marginLeft: 8 }}>ID: {f.funnelId || f.id}</span>}
